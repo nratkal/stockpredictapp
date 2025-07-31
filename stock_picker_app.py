@@ -8,13 +8,13 @@ from sklearn.model_selection import train_test_split
 # ---- Helper functions ----
 
 def fetch_data(ticker, period="1y", interval="1d"):
-    """Fetch historical price data from yfinance."""
+    """Fetch historical price data from yfinance, return None if invalid or missing Adj Close."""
     try:
         df = yf.download(ticker, period=period, interval=interval, progress=False)
-        if df.empty:
+        if df.empty or 'Adj Close' not in df.columns:
             return None
         return df
-    except Exception as e:
+    except Exception:
         return None
 
 def prepare_features(df):
@@ -43,23 +43,30 @@ def create_labels(df, threshold=0.01):
     return df
 
 def train_model(tickers):
-    """Train a simple RandomForestClassifier on combined ticker data."""
+    """Train a RandomForestClassifier on combined ticker data with data validation."""
     data_list = []
     for ticker in tickers:
         df = fetch_data(ticker)
         if df is None:
+            st.warning(f"No valid data for ticker: {ticker}. Skipping.")
             continue
         df = prepare_features(df)
         df = create_labels(df)
+        if df.empty:
+            st.warning(f"Insufficient data for ticker: {ticker}. Skipping.")
+            continue
         features = df[['Return', 'MA5', 'MA10', 'MA20']]
         labels = df['Label']
-        # Add ticker as a feature if you want, but here we combine all tickers
         data_list.append((features, labels))
+
     if not data_list:
-        return None
+        return None, None
 
     X = pd.concat([x[0] for x in data_list])
     y = pd.concat([x[1] for x in data_list])
+
+    if X.empty or y.empty:
+        return None, None
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     model = RandomForestClassifier(n_estimators=100, random_state=42)
@@ -70,9 +77,11 @@ def train_model(tickers):
 def predict_action(ticker, model):
     """Predict buy/hold/sell for the latest data of a ticker."""
     df = fetch_data(ticker, period="1mo")
-    if df is None or df.empty:
+    if df is None or df.empty or 'Adj Close' not in df.columns:
         return "No data"
     df = prepare_features(df)
+    if df.empty:
+        return "No data"
     latest_features = df[['Return', 'MA5', 'MA10', 'MA20']].iloc[-1:].values
     pred = model.predict(latest_features)[0]
     if pred == 1:
