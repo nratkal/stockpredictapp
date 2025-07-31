@@ -66,22 +66,26 @@ def analyze_sentiment(headlines):
 @st.cache_data(ttl=86400)
 def train_model(tickers):
     all_data = []
-for ticker in tickers:
-    df = fetch_price_data(ticker)
-    if df.empty or len(df) < 60:
-        st.warning(f"Skipping {ticker}: Not enough data or invalid ticker.")
-        continue
-
-    try:
-        df_feat = calculate_features(df)
-        if df_feat.empty:
-            st.warning(f"Skipping {ticker}: Feature calculation failed.")
+    for ticker in tickers:
+        df = fetch_price_data(ticker)
+        if df.empty or len(df) < 60:
+            st.warning(f"Skipping {ticker}: Not enough data or invalid ticker.")
             continue
-        df_feat['Ticker'] = ticker
-        all_data.append(df_feat)
-    except Exception as e:
-        st.warning(f"Skipping {ticker} due to error: {e}")
-        continue
+
+        try:
+            df_feat = calculate_features(df)
+            if df_feat.empty:
+                st.warning(f"Skipping {ticker}: Feature calculation failed.")
+                continue
+            df_feat['Ticker'] = ticker
+            all_data.append(df_feat)
+        except Exception as e:
+            st.warning(f"Skipping {ticker} due to error: {e}")
+            continue
+
+    if not all_data:
+        st.error("No valid data to train the model.")
+        return None, 0.0
 
     full_df = pd.concat(all_data, ignore_index=True)
     full_df.dropna(inplace=True)
@@ -97,6 +101,10 @@ for ticker in tickers:
     return model, acc
 
 model, acc = train_model(TICKERS)
+
+if model is None:
+    st.stop()
+
 st.sidebar.markdown(f"**Model Accuracy:** `{acc:.2%}`")
 
 # --- Evaluate Tickers ---
