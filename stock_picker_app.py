@@ -11,13 +11,19 @@ import requests
 
 nltk.download('vader_lexicon')
 
-# --- App Title ---
+st.set_page_config(page_title="AI Stock Picker", layout="wide")
 st.title("📈 AI Stock Picker (Price + News Sentiment)")
-st.write("Predict short-term stock movements using historical prices, technicals, and Reddit news sentiment.")
 
-# --- Sidebar Settings ---
-TICKERS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 'INTC', 'AMD', 'NFLX']
-selected_tickers = st.sidebar.multiselect("Select tickers to analyze:", TICKERS, default=TICKERS)
+# --- User Input for Tickers ---
+user_input = st.text_input(
+    "Enter stock tickers separated by commas (e.g., AAPL, TSLA, NVDA):", 
+    value="AAPL, MSFT, TSLA, NVDA"
+)
+TICKERS = [t.strip().upper() for t in user_input.split(',') if t.strip()]
+
+if not TICKERS:
+    st.warning("Please enter at least one valid stock ticker.")
+    st.stop()
 
 # --- Cache Price Data ---
 @st.cache_data(ttl=3600)
@@ -36,7 +42,7 @@ def calculate_features(df):
     df = df.dropna()
     return df[['MA10', 'MA50', 'Volatility', 'Momentum', 'Target']]
 
-# --- News Fetch (Reddit search API) ---
+# --- News Fetch (Reddit as fallback) ---
 def fetch_reddit_headlines(ticker, limit=10):
     url = f"https://www.reddit.com/r/stocks/search.json?q={ticker}&restrict_sr=1&sort=new"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -82,41 +88,46 @@ def train_model(tickers):
 model, acc = train_model(TICKERS)
 st.sidebar.markdown(f"**Model Accuracy:** `{acc:.2%}`")
 
-# --- Evaluate Selected Tickers ---
+# --- Evaluate Tickers ---
 st.header("📊 Stock Picks & Predictions")
 results = []
 
-for ticker in selected_tickers:
-    df = fetch_price_data(ticker)
-    df_feat = calculate_features(df)
-    if df_feat.empty:
-        continue
+for ticker in TICKERS:
+    try:
+        df = fetch_price_data(ticker)
+        df_feat = calculate_features(df)
+        if df_feat.empty:
+            continue
 
-    latest = df_feat.iloc[-1]
-    X_live = latest[['MA10', 'MA50', 'Volatility', 'Momentum']].values.reshape(1, -1)
-    prediction = model.predict(X_live)[0]
-    confidence = model.predict_proba(X_live)[0][prediction]
+        latest = df_feat.iloc[-1]
+        X_live = latest[['MA10', 'MA50', 'Volatility', 'Momentum']].values.reshape(1, -1)
 
-    headlines = fetch_reddit_headlines(ticker)
-    sentiment = analyze_sentiment(headlines)
-    composite = 0.6 * confidence + 0.4 * ((sentiment + 1) / 2)
+        probs = model.predict_proba(X_live)[0]
+        prediction = int(probs[1] > 0.55)  # Buy if >55% chance
+        confidence = probs[1] if prediction == 1 else probs[0]
 
-    results.append({
-        'Ticker': ticker,
-        'Signal': 'Buy' if prediction == 1 else 'Sell/Hold',
-        'Confidence': confidence,
-        'Sentiment': sentiment,
-        'Composite': composite,
-        'Headlines': headlines[:3]
-    })
+        headlines = fetch_reddit_headlines(ticker)
+        sentiment = analyze_sentiment(headlines)
+        composite = 0.6 * confidence + 0.4 * ((sentiment + 1) / 2)
+
+        results.append({
+            'Ticker': ticker,
+            'Signal': 'Buy' if prediction == 1 else 'Sell/Hold',
+            'Confidence': confidence,
+            'Sentiment': sentiment,
+            'Composite': composite,
+            'Headlines': headlines[:3]
+        })
+    except Exception as e:
+        st.warning(f"Error processing {ticker}: {e}")
 
 # --- Show Results ---
 results = sorted(results, key=lambda x: x['Composite'], reverse=True)
 
 if not results:
-    st.warning("No results to display. Please select valid tickers.")
+    st.warning("No predictions available. Check ticker symbols or try different ones.")
 else:
-    for res in results[:3]:
+    for res in results[:5]:
         st.subheader(f"📈 {res['Ticker']} — {res['Signal']}")
         st.write(f"Confidence: `{res['Confidence']:.2f}`")
         st.write(f"Sentiment: `{res['Sentiment']:.2f}`")
