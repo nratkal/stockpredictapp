@@ -1,8 +1,5 @@
 streamlit
 yfinance
+scikit-learn
 pandas
 numpy
-nltk
-scikit-learn
-requests
-beautifulsoup4
